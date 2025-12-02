@@ -1,7 +1,7 @@
 # Jira MCP Server
 
 [![CI](https://github.com/icy-r/jira-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/icy-r/jira-mcp/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/jira-mcp.svg)](https://www.npmjs.com/package/jira-mcp)
+[![npm version](https://img.shields.io/npm/v/@icy-r/jira-mcp.svg)](https://www.npmjs.com/package/@icy-r/jira-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Model Context Protocol (MCP) server that enables AI assistants to interact with Jira Cloud via REST API. Built with TypeScript, featuring optimized responses using TOON format for reduced token usage.
@@ -29,8 +29,20 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 ## Installation
 
 ```bash
+npm install @icy-r/jira-mcp
+```
+
+Or run directly with npx:
+
+```bash
+npx @icy-r/jira-mcp
+```
+
+### From Source
+
+```bash
 # Clone the repository
-git clone https://github.com/your-username/jira-mcp.git
+git clone https://github.com/icy-r/jira-mcp.git
 cd jira-mcp
 
 # Install dependencies
