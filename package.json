@@ -1,6 +1,6 @@
 {
   "name": "jira-mcp",
-  "version": "2.0.0",
+  "version": "0.0.0-development",
   "description": "A Model Context Protocol (MCP) server for Jira Cloud integration with AI assistants",
   "type": "module",
   "main": "dist/index.js",
@@ -38,8 +38,15 @@
     "agile",
     "project-management"
   ],
-  "author": "",
+  "author": "icy-r",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/icy-r/jira-mcp/issues"
+  },
+  "homepage": "https://github.com/icy-r/jira-mcp#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/icy-r/jira-mcp.git"
@@ -57,6 +64,8 @@
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
     "@eslint/js": "^9.39.1",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
     "@types/node": "^24.10.1",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
@@ -67,6 +76,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "^3.7.3",
+    "semantic-release": "^25.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.14"
