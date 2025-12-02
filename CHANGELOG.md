@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/icy-r/jira-mcp/compare/v1.0.0...v1.0.1) (2025-12-02)
+
+
+### Bug Fixes
+
+* **npm:** use [@icy-r](https://github.com/icy-r) scoped package name ([ee8060d](https://github.com/icy-r/jira-mcp/commit/ee8060d8fc10fc0f6c3c90352f6ee81ee8fc744e))
+
 # 1.0.0 (2025-12-02)
 
 

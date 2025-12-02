@@ -1,6 +1,6 @@
 {
   "name": "@icy-r/jira-mcp",
-  "version": "0.0.0-development",
+  "version": "1.0.1",
   "description": "A Model Context Protocol (MCP) server for Jira Cloud integration with AI assistants",
   "type": "module",
   "main": "dist/index.js",
