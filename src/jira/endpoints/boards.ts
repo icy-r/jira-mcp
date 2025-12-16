@@ -17,6 +17,7 @@ const logger = createLogger('jira-boards');
  * @param type - Filter by board type
  * @param startAt - Starting index for pagination
  * @param maxResults - Maximum results to return
+ * @param name - Filter by board name (fuzzy search)
  * @returns Paginated list of boards
  *
  * @example
@@ -26,9 +27,10 @@ export async function listBoards(
   projectKeyOrId?: string,
   type?: 'scrum' | 'kanban' | 'simple',
   startAt: number = 0,
-  maxResults: number = 50
+  maxResults: number = 50,
+  name?: string
 ): Promise<PaginatedResponse<JiraBoard>> {
-  logger.debug('Listing boards', { projectKeyOrId, type });
+  logger.debug('Listing boards', { projectKeyOrId, type, name });
 
   const response = await getClient().get<{
     startAt: number;
@@ -42,6 +44,7 @@ export async function listBoards(
       maxResults,
       projectKeyOrId,
       type,
+      name, // Jira Agile API supports name parameter for fuzzy search
     },
   });
 
@@ -127,6 +130,58 @@ export async function getBoardBacklog(
       maxResults,
       jql,
       fields: 'summary,status,assignee,priority,issuetype',
+    },
+  });
+
+  return {
+    startAt: response.startAt,
+    maxResults: response.maxResults,
+    total: response.total,
+    values: response.issues,
+    isLast: response.startAt + response.issues.length >= response.total,
+  };
+}
+
+/**
+ * Gets all issues for a board (including all sprints and backlog).
+ *
+ * @param boardId - The board ID
+ * @param startAt - Starting index for pagination
+ * @param maxResults - Maximum results to return
+ * @param jql - Additional JQL filter
+ * @returns Paginated list of board issues
+ */
+export async function getBoardIssues(
+  boardId: number,
+  startAt: number = 0,
+  maxResults: number = 50,
+  jql?: string
+): Promise<
+  PaginatedResponse<{
+    id: string;
+    key: string;
+    self: string;
+    fields?: Record<string, unknown>;
+  }>
+> {
+  logger.debug('Getting board issues', { boardId, jql });
+
+  const response = await getClient().get<{
+    startAt: number;
+    maxResults: number;
+    total: number;
+    issues: Array<{
+      id: string;
+      key: string;
+      self: string;
+      fields?: Record<string, unknown>;
+    }>;
+  }>(`/rest/agile/1.0/board/${boardId}/issue`, {
+    params: {
+      startAt,
+      maxResults,
+      jql,
+      fields: 'summary,status,assignee,priority,issuetype,updated',
     },
   });
 

@@ -5,6 +5,7 @@
 
 import { getClient } from '../client.js';
 import { createLogger } from '../../utils/logger.js';
+import { markdownToAdf } from '../../utils/adf.js';
 
 const logger = createLogger('jira-links');
 
@@ -98,21 +99,35 @@ export async function getLinkTypes(): Promise<IssueLinkType[]> {
 }
 
 /**
+ * Comment visibility restriction.
+ */
+export interface CommentVisibility {
+  /** Type of restriction: 'group' or 'role' */
+  type: 'group' | 'role';
+  /** Group name or role name/ID */
+  value: string;
+}
+
+/**
  * Creates a link between two issues.
  *
  * @param outwardIssueKey - The issue that is the source of the link
  * @param inwardIssueKey - The issue that is the target of the link
  * @param linkTypeName - The name of the link type (e.g., 'Blocks', 'Relates')
  * @param comment - Optional comment to add
+ * @param commentVisibility - Optional visibility restriction for the comment
  *
  * @example
  * await createIssueLink('PROJ-1', 'PROJ-2', 'Blocks', 'PROJ-1 blocks PROJ-2');
+ * // With visibility restriction
+ * await createIssueLink('PROJ-1', 'PROJ-2', 'Blocks', 'Internal note', { type: 'role', value: 'Developers' });
  */
 export async function createIssueLink(
   outwardIssueKey: string,
   inwardIssueKey: string,
   linkTypeName: string,
-  comment?: string
+  comment?: string,
+  commentVisibility?: CommentVisibility
 ): Promise<void> {
   logger.debug('Creating issue link', {
     outwardIssueKey,
@@ -127,18 +142,19 @@ export async function createIssueLink(
   };
 
   if (comment) {
-    body['comment'] = {
-      body: {
-        type: 'doc',
-        version: 1,
-        content: [
-          {
-            type: 'paragraph',
-            content: [{ type: 'text', text: comment }],
-          },
-        ],
-      },
+    // Convert markdown to ADF for proper formatting
+    const commentObj: Record<string, unknown> = {
+      body: markdownToAdf(comment),
     };
+
+    if (commentVisibility) {
+      commentObj['visibility'] = {
+        type: commentVisibility.type,
+        value: commentVisibility.value,
+      };
+    }
+
+    body['comment'] = commentObj;
   }
 
   await getClient().post('/rest/api/3/issueLink', { body });

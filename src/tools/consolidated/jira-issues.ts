@@ -17,16 +17,17 @@ import {
   getTransitions,
   linkToEpic,
   getChangelog,
+  getProjectIssues,
+  batchCreateIssues,
+  batchGetChangelogs,
   MINIMAL_ISSUE_FIELDS,
   FULL_ISSUE_FIELDS,
+  type BatchCreateIssueInput,
 } from '../../jira/endpoints/issues.js';
+import { getClient } from '../../jira/client.js';
 import { buildSearchJql, type SearchPreset } from '../presets.js';
-import {
-  encodeToon,
-  simplifyIssue,
-  simplifyIssues,
-} from '../../formatters/toon.js';
-import { adfToPlainText, isAdfDocument } from '../../utils/adf.js';
+import { encodeToon, simplifyIssues } from '../../formatters/toon.js';
+import { adfToMarkdown, isAdfDocument } from '../../utils/adf.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   logAudit,
@@ -55,6 +56,9 @@ const jiraIssuesSchema = z.object({
       'get_transitions',
       'link_to_epic',
       'get_changelog',
+      'get_project_issues',
+      'batch_create',
+      'batch_get_changelogs',
     ])
     .describe('The action to perform'),
 
@@ -73,6 +77,19 @@ const jiraIssuesSchema = z.object({
     .default(false)
     .describe(
       'Return full issue data instead of minimal fields (default: false)'
+    ),
+  expand: z
+    .string()
+    .optional()
+    .describe(
+      'Fields to expand (e.g., "renderedFields", "transitions", "changelog")'
+    ),
+  commentLimit: z
+    .number()
+    .optional()
+    .default(10)
+    .describe(
+      'Maximum number of comments to include (0 for none, default: 10)'
     ),
 
   // Safety options
@@ -108,7 +125,7 @@ const jiraIssuesSchema = z.object({
     .nullable()
     .optional()
     .describe(
-      'Assignee account ID for create/update/assign (null to unassign)'
+      "Assignee identifier (email, display name, or account ID) for create/update/assign (null to unassign). Example: 'user@example.com', 'John Doe', 'accountid:...'"
     ),
   labels: z.array(z.string()).optional().describe('Labels for create/update'),
   components: z
@@ -174,6 +191,47 @@ const jiraIssuesSchema = z.object({
     .nullable()
     .optional()
     .describe('Epic key to link to (null to unlink) for link_to_epic action'),
+
+  // Batch create fields
+  issues: z
+    .array(
+      z.object({
+        projectKey: z.string(),
+        summary: z.string(),
+        issueType: z.string(),
+        description: z.string().optional(),
+        priority: z.string().optional(),
+        assignee: z.string().optional(),
+        labels: z.array(z.string()).optional(),
+        components: z.array(z.string()).optional(),
+        parentKey: z.string().optional(),
+        customFields: z.record(z.string(), z.unknown()).optional(),
+      })
+    )
+    .optional()
+    .describe('Array of issues for batch_create action'),
+  validateOnly: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Only validate issues without creating (for batch_create)'),
+
+  // Batch changelog fields
+  issueKeys: z
+    .array(z.string())
+    .optional()
+    .describe('Array of issue keys for batch_get_changelogs'),
+  fieldIds: z
+    .array(z.string())
+    .optional()
+    .describe('Filter changelogs by field IDs (for batch_get_changelogs)'),
+
+  // Pagination for get_project_issues
+  startAt: z
+    .number()
+    .optional()
+    .default(0)
+    .describe('Starting index for pagination'),
 });
 
 type JiraIssuesInput = z.infer<typeof jiraIssuesSchema>;
@@ -184,6 +242,7 @@ type JiraIssuesInput = z.infer<typeof jiraIssuesSchema>;
 function getAuditAction(action: JiraIssuesInput['action']): AuditAction | null {
   switch (action) {
     case 'create':
+    case 'batch_create':
       return 'create';
     case 'update':
       return 'update';
@@ -201,24 +260,141 @@ function getAuditAction(action: JiraIssuesInput['action']): AuditAction | null {
 }
 
 /**
- * Formats issue response based on full flag.
+ * Formats issue response in a clean, minimal format optimized for token efficiency.
+ * Returns only essential fields in a readable markdown-like format.
+ *
+ * @param issue - The Jira issue to format
+ * @param full - Whether to include description and comments
+ * @returns Formatted string representation of the issue
  */
 function formatIssueResponse(issue: JiraIssue, full: boolean): string {
+  const fields = issue.fields;
+
+  // Extract basic info
+  const summary = fields.summary || '';
+  const status = fields.status?.name || '';
+  const issueType = fields.issuetype?.name || '';
+  const priority = fields.priority?.name || '';
+  const created = fields.created || '';
+  const updated = fields.updated || '';
+
+  // Extract people
+  const reporter = fields.reporter?.displayName || '';
+  const assignee = fields.assignee?.displayName || '';
+
+  // Extract project
+  const projectKey = fields.project?.key || '';
+  const projectName = fields.project?.name || '';
+
+  // Extract parent/epic
+  const parent = fields.parent as
+    | { key: string; fields?: { summary?: string } }
+    | undefined;
+  const parentInfo = parent
+    ? `${parent.key} - ${parent.fields?.summary || ''}`
+    : '';
+
+  // Extract labels
+  const labels = fields.labels?.join(', ') || '';
+
+  // Extract sprint info (custom field varies by instance)
+  const fieldsRecord = fields as Record<string, unknown>;
+  const sprint = fieldsRecord['customfield_11840'] as
+    | Array<{ name: string; state: string }>
+    | undefined;
+  const sprintInfo = sprint?.[0]
+    ? `${sprint[0].name} (${sprint[0].state})`
+    : '';
+
+  // Build minimal response
+  const lines: string[] = [];
+  lines.push(`# ${issue.key}: ${summary}`);
+  lines.push('');
+  lines.push(`**Type**: ${issueType}`);
+  lines.push(`**Status**: ${status}`);
+  if (priority) lines.push(`**Priority**: ${priority}`);
+  lines.push(`**Project**: ${projectKey} - ${projectName}`);
+  if (parentInfo) lines.push(`**Parent/Epic**: ${parentInfo}`);
+  if (reporter) lines.push(`**Reporter**: ${reporter}`);
+  if (assignee) lines.push(`**Assignee**: ${assignee}`);
+  if (labels) lines.push(`**Labels**: ${labels}`);
+  if (sprintInfo) lines.push(`**Sprint**: ${sprintInfo}`);
+  lines.push(`**Created**: ${created}`);
+  lines.push(`**Updated**: ${updated}`);
+
   if (full) {
-    // Convert ADF descriptions to markdown for readability
-    const formatted = {
-      ...issue,
-      fields: {
-        ...issue.fields,
-        description: isAdfDocument(issue.fields.description)
-          ? adfToPlainText(issue.fields.description)
-          : issue.fields.description,
-      },
-    };
-    return JSON.stringify(formatted, null, 2);
+    // Add description
+    const description = isAdfDocument(fields.description)
+      ? adfToMarkdown(fields.description)
+      : (fields.description as string) || '';
+
+    if (description) {
+      lines.push('');
+      lines.push('## Description');
+      lines.push('');
+      lines.push(description);
+    }
+
+    // Add comments if present
+    const comments = fields.comment?.comments || [];
+    if (comments.length > 0) {
+      lines.push('');
+      lines.push('## Comments');
+      lines.push('');
+      for (const comment of comments.slice(0, 10)) {
+        // Limit to 10 comments
+        const author = comment.author?.displayName || 'Unknown';
+        const commentDate = comment.created || '';
+        const body = isAdfDocument(comment.body)
+          ? adfToMarkdown(comment.body)
+          : (comment.body as string) || '';
+
+        lines.push(`### ${author} - ${commentDate}`);
+        lines.push(body);
+        lines.push('');
+      }
+    }
+
+    // Add subtasks if present
+    const subtasks = fields.subtasks || [];
+    if (subtasks.length > 0) {
+      lines.push('');
+      lines.push('## Subtasks');
+      lines.push('');
+      for (const subtask of subtasks) {
+        const subtaskStatus = subtask.fields?.status?.name || '';
+        lines.push(
+          `- [${subtask.key}] ${subtask.fields?.summary || ''} (${subtaskStatus})`
+        );
+      }
+    }
+
+    // Add issue links if present
+    const issueLinks = (fieldsRecord['issuelinks'] || []) as Array<{
+      type?: { name?: string; outward?: string; inward?: string };
+      outwardIssue?: { key: string; fields?: { summary?: string } };
+      inwardIssue?: { key: string; fields?: { summary?: string } };
+    }>;
+    if (issueLinks.length > 0) {
+      lines.push('');
+      lines.push('## Linked Issues');
+      lines.push('');
+      for (const link of issueLinks) {
+        const linkType = link.type?.name || '';
+        const linkedIssue = link.outwardIssue || link.inwardIssue;
+        if (linkedIssue) {
+          const direction = link.outwardIssue
+            ? link.type?.outward
+            : link.type?.inward;
+          lines.push(
+            `- ${direction || linkType}: [${linkedIssue.key}] ${linkedIssue.fields?.summary || ''}`
+          );
+        }
+      }
+    }
   }
 
-  return encodeToon(simplifyIssue(issue));
+  return lines.join('\n');
 }
 
 /**
@@ -246,8 +422,20 @@ async function handleJiraIssues(input: JiraIssuesInput): Promise<string> {
       if (!input.issueKey) {
         throw new Error('issueKey is required for get action');
       }
+
+      // Validate project access
+      const client = getClient();
+      client.validateProjectAccess(input.issueKey);
+
       const fields = input.full ? FULL_ISSUE_FIELDS : MINIMAL_ISSUE_FIELDS;
-      const issue = await getIssue(input.issueKey, fields);
+      // Add comment field if commentLimit > 0
+      const fieldsWithComment =
+        (input.commentLimit ?? 10) > 0 && !input.full
+          ? [...fields, 'comment']
+          : fields;
+
+      const expand = input.expand ? input.expand.split(',') : undefined;
+      const issue = await getIssue(input.issueKey, fieldsWithComment, expand);
       return formatIssueResponse(issue, input.full ?? false);
     }
 
@@ -669,6 +857,134 @@ async function handleJiraIssues(input: JiraIssuesInput): Promise<string> {
       return encodeToon({ changelog: simplified, total: changelog.total });
     }
 
+    case 'get_project_issues': {
+      if (!input.projectKey) {
+        throw new Error('projectKey is required for get_project_issues action');
+      }
+
+      // Validate project access
+      const client = getClient();
+      const projectsFilter = client.getProjectsFilter();
+      if (
+        projectsFilter &&
+        !projectsFilter.includes(input.projectKey.toUpperCase())
+      ) {
+        throw new Error(
+          `Project '${input.projectKey}' is restricted by configuration`
+        );
+      }
+
+      const fields = input.full ? FULL_ISSUE_FIELDS : MINIMAL_ISSUE_FIELDS;
+      const response = await getProjectIssues(
+        input.projectKey,
+        input.startAt ?? 0,
+        input.maxResults ?? 50,
+        fields
+      );
+
+      const result = {
+        issues: input.full ? response.issues : simplifyIssues(response.issues),
+        total: response.total,
+        nextPageToken: response.nextPageToken,
+      };
+
+      return input.full ? JSON.stringify(result, null, 2) : encodeToon(result);
+    }
+
+    case 'batch_create': {
+      if (!input.issues?.length) {
+        throw new Error('issues array is required for batch_create action');
+      }
+
+      const batchInput = input.issues as BatchCreateIssueInput[];
+
+      // Dry-run mode
+      if (isDryRun) {
+        logAudit({
+          action: 'create',
+          resource: 'issues',
+          input: { count: batchInput.length, validateOnly: input.validateOnly },
+          result: 'dry-run',
+        });
+        return createDryRunSummary('create', 'issues', undefined, {
+          count: batchInput.length,
+          issues: batchInput.map((i) => ({
+            projectKey: i.projectKey,
+            summary: i.summary,
+            issueType: i.issueType,
+          })),
+        });
+      }
+
+      try {
+        const created = await batchCreateIssues(
+          batchInput,
+          input.validateOnly ?? false
+        );
+
+        if (input.validateOnly) {
+          return encodeToon({
+            success: true,
+            message: 'Issues validated successfully',
+            count: batchInput.length,
+          });
+        }
+
+        logAudit({
+          action: 'create',
+          resource: 'issues',
+          input: { count: batchInput.length },
+          result: 'success',
+        });
+
+        return encodeToon({
+          success: true,
+          message: `Created ${created.length} issues`,
+          issues: simplifyIssues(created),
+        });
+      } catch (err) {
+        logAudit({
+          action: 'create',
+          resource: 'issues',
+          input: { count: batchInput.length },
+          result: 'failure',
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    }
+
+    case 'batch_get_changelogs': {
+      if (!input.issueKeys?.length) {
+        throw new Error(
+          'issueKeys array is required for batch_get_changelogs action'
+        );
+      }
+
+      const changelogs = await batchGetChangelogs(
+        input.issueKeys,
+        input.fieldIds
+      );
+
+      const result = changelogs.map((item) => ({
+        issueId: item.issueId,
+        changelogs: item.changelogs
+          .slice(0, input.maxResults ?? 50)
+          .map((entry) => ({
+            id: entry.id,
+            author: entry.author.displayName,
+            created: entry.created.split('T')[0],
+            changes: entry.items.map((change) => ({
+              field: change.field,
+              from: change.fromString,
+              to: change.toString,
+            })),
+          })),
+      }));
+
+      return input.full ? JSON.stringify(result, null, 2) : encodeToon(result);
+    }
+
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -691,6 +1007,9 @@ export function registerJiraIssuesTool(server: McpServer): void {
 - get_transitions: Get available status transitions
 - link_to_epic: Link issue to/from epic
 - get_changelog: Get issue history
+- get_project_issues: Get all issues for a project
+- batch_create: Create multiple issues at once
+- batch_get_changelogs: Get changelogs for multiple issues (Cloud only)
 
 Safety: Use dryRun=true to preview changes. Destructive actions require confirm=true.`,
     jiraIssuesSchema.shape,

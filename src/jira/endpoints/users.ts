@@ -135,3 +135,71 @@ export async function bulkGetUsers(accountIds: string[]): Promise<JiraUser[]> {
 
   return response.values;
 }
+
+/**
+ * Resolves a user identifier to an account ID.
+ * Accepts email address, display name, or account ID.
+ *
+ * @param identifier - Email, display name, or account ID
+ * @returns The resolved account ID
+ * @throws Error if user cannot be found
+ *
+ * @example
+ * const accountId = await resolveUserIdentifier('john@example.com');
+ * const accountId = await resolveUserIdentifier('John Doe');
+ * const accountId = await resolveUserIdentifier('5b10ac8d82e05b22cc7d4ef5');
+ */
+export async function resolveUserIdentifier(
+  identifier: string
+): Promise<string> {
+  logger.debug('Resolving user identifier', { identifier });
+
+  // If it looks like an account ID (starts with specific patterns), try direct lookup
+  if (
+    identifier.startsWith('accountid:') ||
+    identifier.startsWith('5') ||
+    identifier.startsWith('6')
+  ) {
+    const cleanId = identifier.replace(/^accountid:/, '');
+    try {
+      const user = await getUser(cleanId);
+      return user.accountId;
+    } catch {
+      // Fall through to search
+    }
+  }
+
+  // Search by email or display name
+  const users = await searchUsers(identifier, 10);
+
+  if (users.length === 0) {
+    throw new Error(`User not found: ${identifier}`);
+  }
+
+  // Try exact email match first
+  const emailMatch = users.find(
+    (u) => u.emailAddress?.toLowerCase() === identifier.toLowerCase()
+  );
+  if (emailMatch) {
+    return emailMatch.accountId;
+  }
+
+  // Try exact display name match
+  const nameMatch = users.find(
+    (u) => u.displayName?.toLowerCase() === identifier.toLowerCase()
+  );
+  if (nameMatch) {
+    return nameMatch.accountId;
+  }
+
+  // Return first result if no exact match
+  const firstUser = users[0];
+  if (!firstUser) {
+    throw new Error(`User not found: ${identifier}`);
+  }
+  logger.debug('Using first search result for user', {
+    identifier,
+    accountId: firstUser.accountId,
+  });
+  return firstUser.accountId;
+}

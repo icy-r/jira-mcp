@@ -91,33 +91,40 @@ export class Logger {
 
   /**
    * Logs a debug message.
+   * Uses stderr to avoid interfering with MCP stdio protocol on stdout.
    */
   debug(message: string, context?: Record<string, unknown>): void {
     if (this.shouldLog('debug')) {
-      console.debug(this.format('debug', message, context));
+      // Use stderr for all logging to avoid interfering with MCP JSON-RPC on stdout
+      process.stderr.write(this.format('debug', message, context) + '\n');
     }
   }
 
   /**
    * Logs an info message.
+   * Uses stderr to avoid interfering with MCP stdio protocol on stdout.
    */
   info(message: string, context?: Record<string, unknown>): void {
     if (this.shouldLog('info')) {
-      console.info(this.format('info', message, context));
+      // Use stderr for all logging to avoid interfering with MCP JSON-RPC on stdout
+      process.stderr.write(this.format('info', message, context) + '\n');
     }
   }
 
   /**
    * Logs a warning message.
+   * Uses stderr to avoid interfering with MCP stdio protocol on stdout.
    */
   warn(message: string, context?: Record<string, unknown>): void {
     if (this.shouldLog('warn')) {
-      console.warn(this.format('warn', message, context));
+      // Use stderr for all logging to avoid interfering with MCP JSON-RPC on stdout
+      process.stderr.write(this.format('warn', message, context) + '\n');
     }
   }
 
   /**
    * Logs an error message.
+   * Uses stderr to avoid interfering with MCP stdio protocol on stdout.
    */
   error(
     message: string,
@@ -133,7 +140,8 @@ export class Logger {
             stack: error.stack?.split('\n').slice(0, 5).join('\n'),
           }
         : context;
-      console.error(this.format('error', message, errorContext));
+      // Use stderr for all logging to avoid interfering with MCP JSON-RPC on stdout
+      process.stderr.write(this.format('error', message, errorContext) + '\n');
     }
   }
 

@@ -7,6 +7,7 @@ import { getClient } from '../client.js';
 import type { JiraComment } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
 import type { PaginatedResponse } from '../../types/index.js';
+import { markdownToAdf } from '../../utils/adf.js';
 
 const logger = createLogger('jira-comments');
 
@@ -68,17 +69,9 @@ export async function addComment(
 ): Promise<JiraComment> {
   logger.debug('Adding comment', { issueIdOrKey });
 
+  // Convert markdown to ADF for proper formatting
   const requestBody: Record<string, unknown> = {
-    body: {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text: body }],
-        },
-      ],
-    },
+    body: markdownToAdf(body),
   };
 
   if (visibility) {
@@ -106,20 +99,12 @@ export async function updateComment(
 ): Promise<JiraComment> {
   logger.debug('Updating comment', { issueIdOrKey, commentId });
 
+  // Convert markdown to ADF for proper formatting
   return getClient().put<JiraComment>(
     `/rest/api/3/issue/${issueIdOrKey}/comment/${commentId}`,
     {
       body: {
-        body: {
-          type: 'doc',
-          version: 1,
-          content: [
-            {
-              type: 'paragraph',
-              content: [{ type: 'text', text: body }],
-            },
-          ],
-        },
+        body: markdownToAdf(body),
       },
     }
   );

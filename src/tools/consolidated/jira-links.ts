@@ -65,6 +65,15 @@ const jiraLinksSchema = z.object({
       'Link type name (e.g., "Blocks", "Relates", "Duplicates") for create'
     ),
   comment: z.string().optional().describe('Comment to add with the link'),
+  commentVisibility: z
+    .object({
+      type: z.enum(['group', 'role']),
+      value: z.string(),
+    })
+    .optional()
+    .describe(
+      'Visibility restriction for the comment (e.g., { type: "role", value: "Developers" })'
+    ),
 
   // Epic link fields
   epicKey: z
@@ -150,7 +159,8 @@ async function handleJiraLinks(input: JiraLinksInput): Promise<string> {
         input.issueKey,
         input.targetIssueKey,
         input.linkType,
-        input.comment
+        input.comment,
+        input.commentVisibility
       );
 
       return encodeToon({

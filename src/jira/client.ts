@@ -40,13 +40,23 @@ export class JiraClient {
   private readonly rateLimiter: RateLimiter;
   private readonly maxRetries: number = 3;
   private readonly retryDelay: number = 1000;
+  private readonly projectsFilter: string[] | null;
 
   constructor(config: JiraConfig, rateLimit: number = 100) {
     this.baseUrl = config.baseUrl;
     this.authHeader = this.createAuthHeader(config.email, config.apiToken);
     this.rateLimiter = createJiraRateLimiter(rateLimit);
+    this.projectsFilter = config.projectsFilter
+      ? config.projectsFilter
+          .split(',')
+          .map((p) => p.trim().toUpperCase())
+          .filter((p) => p.length > 0)
+      : null;
 
-    logger.info('Jira client initialized', { baseUrl: this.baseUrl });
+    logger.info('Jira client initialized', {
+      baseUrl: this.baseUrl,
+      projectsFilter: this.projectsFilter,
+    });
   }
 
   /**
@@ -254,6 +264,41 @@ export class JiraClient {
       }
       logger.error('Failed to validate Jira connection', error as Error);
       return false;
+    }
+  }
+
+  /**
+   * Gets the configured projects filter.
+   * @returns Array of allowed project keys (uppercase) or null if no filter
+   */
+  getProjectsFilter(): string[] | null {
+    return this.projectsFilter;
+  }
+
+  /**
+   * Checks if an issue key is allowed by the projects filter.
+   * @param issueKey - The issue key (e.g., "PROJ-123")
+   * @returns true if allowed, false if filtered out
+   */
+  isProjectAllowed(issueKey: string): boolean {
+    if (!this.projectsFilter) {
+      return true;
+    }
+    const projectKey = issueKey.split('-')[0]?.toUpperCase() ?? '';
+    return this.projectsFilter.includes(projectKey);
+  }
+
+  /**
+   * Validates that an issue key is allowed by the projects filter.
+   * @param issueKey - The issue key to validate
+   * @throws {Error} If the project is not in the allowed list
+   */
+  validateProjectAccess(issueKey: string): void {
+    if (!this.isProjectAllowed(issueKey)) {
+      const projectKey = issueKey.split('-')[0]?.toUpperCase() ?? '';
+      throw new Error(
+        `Issue with project prefix '${projectKey}' is restricted by configuration`
+      );
     }
   }
 }

@@ -42,6 +42,7 @@ export type AuditAction =
  */
 export type AuditResource =
   | 'issue'
+  | 'issues'
   | 'comment'
   | 'worklog'
   | 'sprint'

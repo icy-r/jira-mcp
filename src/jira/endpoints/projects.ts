@@ -15,6 +15,7 @@ const logger = createLogger('jira-projects');
  *
  * @param startAt - Starting index for pagination
  * @param maxResults - Maximum results to return
+ * @param includeArchived - Whether to include archived projects (default: false)
  * @returns Paginated list of projects
  *
  * @example
@@ -22,23 +23,37 @@ const logger = createLogger('jira-projects');
  */
 export async function listProjects(
   startAt: number = 0,
-  maxResults: number = 50
+  maxResults: number = 50,
+  includeArchived: boolean = false
 ): Promise<PaginatedResponse<JiraProject>> {
-  logger.debug('Listing projects', { startAt, maxResults });
+  logger.debug('Listing projects', { startAt, maxResults, includeArchived });
 
-  const response = await getClient().get<{
+  const client = getClient();
+  const projectsFilter = client.getProjectsFilter();
+
+  const params: Record<string, string | number | boolean | undefined> = {
+    startAt,
+    maxResults,
+    expand: 'description,lead',
+  };
+
+  // Add status filter based on includeArchived
+  if (!includeArchived) {
+    params['status'] = 'live';
+  }
+
+  // Add project keys filter if configured
+  if (projectsFilter?.length) {
+    params['keys'] = projectsFilter.join(',');
+  }
+
+  const response = await client.get<{
     startAt: number;
     maxResults: number;
     total: number;
     values: JiraProject[];
     isLast: boolean;
-  }>('/rest/api/3/project/search', {
-    params: {
-      startAt,
-      maxResults,
-      expand: 'description,lead',
-    },
-  });
+  }>('/rest/api/3/project/search', { params });
 
   return {
     startAt: response.startAt,

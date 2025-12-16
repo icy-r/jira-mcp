@@ -58,6 +58,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.23.0",
     "@toon-format/toon": "^2.0.1",
+    "marklassian": "^1.1.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {

@@ -7,6 +7,7 @@ import { getClient } from '../client.js';
 import type { JiraWorklog } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
 import type { PaginatedResponse } from '../../types/index.js';
+import { markdownToAdf } from '../../utils/adf.js';
 
 const logger = createLogger('jira-worklogs');
 
@@ -50,12 +51,25 @@ export async function getWorklogs(
 }
 
 /**
+ * Options for adjusting time estimates when adding a worklog.
+ */
+export interface WorklogEstimateOptions {
+  /** How to adjust the remaining estimate */
+  adjustEstimate?: 'new' | 'leave' | 'manual' | 'auto';
+  /** New remaining estimate (required if adjustEstimate is 'new') */
+  newEstimate?: string;
+  /** Amount to reduce remaining estimate by (required if adjustEstimate is 'manual') */
+  reduceBy?: string;
+}
+
+/**
  * Adds a worklog to an issue.
  *
  * @param issueIdOrKey - The issue key or ID
  * @param timeSpent - Time spent (e.g., "1h 30m", "2d")
  * @param started - When the work was started (ISO date string)
  * @param comment - Optional comment
+ * @param estimateOptions - Options for adjusting time estimates
  * @returns The created worklog
  *
  * @example
@@ -65,9 +79,10 @@ export async function addWorklog(
   issueIdOrKey: string,
   timeSpent: string,
   started: string,
-  comment?: string
+  comment?: string,
+  estimateOptions?: WorklogEstimateOptions
 ): Promise<JiraWorklog> {
-  logger.debug('Adding worklog', { issueIdOrKey, timeSpent });
+  logger.debug('Adding worklog', { issueIdOrKey, timeSpent, estimateOptions });
 
   const body: Record<string, unknown> = {
     timeSpent,
@@ -75,21 +90,31 @@ export async function addWorklog(
   };
 
   if (comment) {
-    body['comment'] = {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text: comment }],
-        },
-      ],
-    };
+    // Convert markdown to ADF for proper formatting
+    body['comment'] = markdownToAdf(comment);
+  }
+
+  // Build query params for estimate adjustment
+  const params: Record<string, string | undefined> = {};
+  if (estimateOptions?.adjustEstimate) {
+    params['adjustEstimate'] = estimateOptions.adjustEstimate;
+    if (
+      estimateOptions.adjustEstimate === 'new' &&
+      estimateOptions.newEstimate
+    ) {
+      params['newEstimate'] = estimateOptions.newEstimate;
+    }
+    if (
+      estimateOptions.adjustEstimate === 'manual' &&
+      estimateOptions.reduceBy
+    ) {
+      params['reduceBy'] = estimateOptions.reduceBy;
+    }
   }
 
   return getClient().post<JiraWorklog>(
     `/rest/api/3/issue/${issueIdOrKey}/worklog`,
-    { body }
+    { body, params }
   );
 }
 
@@ -123,16 +148,8 @@ export async function updateWorklog(
   }
 
   if (updates.comment) {
-    body['comment'] = {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text: updates.comment }],
-        },
-      ],
-    };
+    // Convert markdown to ADF for proper formatting
+    body['comment'] = markdownToAdf(updates.comment);
   }
 
   return getClient().put<JiraWorklog>(

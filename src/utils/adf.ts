@@ -1,9 +1,11 @@
 /**
  * Atlassian Document Format (ADF) utilities.
  * Handles conversion between markdown, plain text, and ADF.
+ * Uses the marklassian library for robust markdown-to-ADF conversion.
  * @module utils/adf
  */
 
+import { markdownToAdf as marklassianToAdf } from 'marklassian';
 import type { JiraDocument, JiraDocumentNode } from '../jira/types.js';
 
 /**
@@ -34,8 +36,22 @@ export function textToAdf(text: string): JiraDocument {
 }
 
 /**
- * Converts markdown to ADF format.
- * Supports: headings, lists, code blocks, bold, italic, links, inline code.
+ * Converts markdown to ADF format using the marklassian library.
+ *
+ * Supports:
+ * - Headings (H1-H6)
+ * - Paragraphs and line breaks
+ * - Emphasis (bold, italic, strikethrough)
+ * - Links and images
+ * - Code blocks with language support
+ * - Ordered and unordered lists with nesting
+ * - Blockquotes
+ * - Horizontal rules
+ * - Tables
+ * - Task lists (GitHub Flavored Markdown)
+ *
+ * @see https://github.com/jamsinclair/marklassian
+ * @see https://marklassian.netlify.app/playground - Interactive playground for testing
  *
  * @param markdown - Markdown content
  * @returns ADF document
@@ -45,217 +61,16 @@ export function markdownToAdf(markdown: string): JiraDocument {
     return { type: 'doc', version: 1, content: [] };
   }
 
-  const lines = markdown.split('\n');
-  const content: JiraDocumentNode[] = [];
-  let i = 0;
+  // Use the marklassian library for robust conversion
+  const adfDocument = marklassianToAdf(markdown);
 
-  while (i < lines.length) {
-    const line = lines[i] ?? '';
-
-    // Code block
-    if (line.startsWith('```')) {
-      const language = line.slice(3).trim() || undefined;
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !(lines[i] ?? '').startsWith('```')) {
-        codeLines.push(lines[i] ?? '');
-        i++;
-      }
-      content.push({
-        type: 'codeBlock',
-        attrs: language ? { language } : undefined,
-        content: [{ type: 'text', text: codeLines.join('\n') }],
-      });
-      i++;
-      continue;
-    }
-
-    // Headings
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
-    if (headingMatch && headingMatch[1] && headingMatch[2]) {
-      const level = headingMatch[1].length;
-      content.push({
-        type: 'heading',
-        attrs: { level },
-        content: parseInlineMarkdown(headingMatch[2]),
-      });
-      i++;
-      continue;
-    }
-
-    // Unordered list
-    if (line.match(/^[-*]\s+/)) {
-      const listItems: JiraDocumentNode[] = [];
-      while (i < lines.length && (lines[i] ?? '').match(/^[-*]\s+/)) {
-        const itemText = (lines[i] ?? '').replace(/^[-*]\s+/, '');
-        listItems.push({
-          type: 'listItem',
-          content: [
-            {
-              type: 'paragraph',
-              content: parseInlineMarkdown(itemText),
-            },
-          ],
-        });
-        i++;
-      }
-      content.push({
-        type: 'bulletList',
-        content: listItems,
-      });
-      continue;
-    }
-
-    // Ordered list
-    if (line.match(/^\d+\.\s+/)) {
-      const listItems: JiraDocumentNode[] = [];
-      while (i < lines.length && (lines[i] ?? '').match(/^\d+\.\s+/)) {
-        const itemText = (lines[i] ?? '').replace(/^\d+\.\s+/, '');
-        listItems.push({
-          type: 'listItem',
-          content: [
-            {
-              type: 'paragraph',
-              content: parseInlineMarkdown(itemText),
-            },
-          ],
-        });
-        i++;
-      }
-      content.push({
-        type: 'orderedList',
-        content: listItems,
-      });
-      continue;
-    }
-
-    // Blockquote
-    if (line.startsWith('>')) {
-      const quoteLines: string[] = [];
-      while (i < lines.length && (lines[i] ?? '').startsWith('>')) {
-        quoteLines.push((lines[i] ?? '').replace(/^>\s*/, ''));
-        i++;
-      }
-      content.push({
-        type: 'blockquote',
-        content: [
-          {
-            type: 'paragraph',
-            content: parseInlineMarkdown(quoteLines.join(' ')),
-          },
-        ],
-      });
-      continue;
-    }
-
-    // Horizontal rule
-    if (line.match(/^[-*_]{3,}$/)) {
-      content.push({ type: 'rule' });
-      i++;
-      continue;
-    }
-
-    // Empty line (skip)
-    if (!line.trim()) {
-      i++;
-      continue;
-    }
-
-    // Regular paragraph
-    content.push({
-      type: 'paragraph',
-      content: parseInlineMarkdown(line),
-    });
-    i++;
-  }
-
-  return { type: 'doc', version: 1, content };
-}
-
-/**
- * Parses inline markdown formatting.
- */
-function parseInlineMarkdown(text: string): JiraDocumentNode[] {
-  const nodes: JiraDocumentNode[] = [];
-  let remaining = text;
-
-  while (remaining) {
-    // Bold (**text** or __text__)
-    let match = remaining.match(/^(.*?)\*\*(.+?)\*\*(.*)/s);
-    if (!match) {
-      match = remaining.match(/^(.*?)__(.+?)__(.*)/s);
-    }
-    if (match && match[2] && match[3] !== undefined) {
-      if (match[1]) {
-        nodes.push(...parseInlineMarkdown(match[1]));
-      }
-      nodes.push({
-        type: 'text',
-        text: match[2],
-        marks: [{ type: 'strong' }],
-      });
-      remaining = match[3];
-      continue;
-    }
-
-    // Italic (*text* or _text_)
-    match = remaining.match(/^(.*?)\*([^*]+)\*(.*)/s);
-    if (!match) {
-      match = remaining.match(/^(.*?)_([^_]+)_(.*)/s);
-    }
-    if (match && match[1] !== undefined && match[2] && match[3] !== undefined) {
-      if (match[1]) {
-        nodes.push(...parseInlineMarkdown(match[1]));
-      }
-      nodes.push({
-        type: 'text',
-        text: match[2],
-        marks: [{ type: 'em' }],
-      });
-      remaining = match[3];
-      continue;
-    }
-
-    // Inline code (`code`)
-    match = remaining.match(/^(.*?)`([^`]+)`(.*)/s);
-    if (match && match[2] && match[3] !== undefined) {
-      if (match[1]) {
-        nodes.push(...parseInlineMarkdown(match[1]));
-      }
-      nodes.push({
-        type: 'text',
-        text: match[2],
-        marks: [{ type: 'code' }],
-      });
-      remaining = match[3];
-      continue;
-    }
-
-    // Link [text](url)
-    match = remaining.match(/^(.*?)\[([^\]]+)\]\(([^)]+)\)(.*)/s);
-    if (match && match[2] && match[3] && match[4] !== undefined) {
-      if (match[1]) {
-        nodes.push(...parseInlineMarkdown(match[1]));
-      }
-      nodes.push({
-        type: 'text',
-        text: match[2],
-        marks: [{ type: 'link', attrs: { href: match[3] } }],
-      });
-      remaining = match[4];
-      continue;
-    }
-
-    // Plain text (no more formatting)
-    nodes.push({ type: 'text', text: remaining });
-    break;
-  }
-
-  return nodes;
+  // The marklassian library returns a compatible ADF document
+  return adfDocument as JiraDocument;
 }
 
 /**
  * Converts ADF to markdown format.
+ * Properly handles tables, nested lists, panels, and other complex structures.
  *
  * @param adf - ADF document or node
  * @returns Markdown string
@@ -275,7 +90,7 @@ export function adfToMarkdown(
 /**
  * Converts a single ADF node to markdown.
  */
-function nodeToMarkdown(node: JiraDocumentNode): string {
+function nodeToMarkdown(node: JiraDocumentNode, indent: string = ''): string {
   switch (node.type) {
     case 'text': {
       let text = node.text || '';
@@ -297,6 +112,25 @@ function nodeToMarkdown(node: JiraDocumentNode): string {
             case 'strike':
               text = `~~${text}~~`;
               break;
+            case 'underline':
+              text = `<u>${text}</u>`;
+              break;
+            case 'subsup': {
+              const type = (mark.attrs as { type?: string })?.type;
+              if (type === 'sub') {
+                text = `<sub>${text}</sub>`;
+              } else if (type === 'sup') {
+                text = `<sup>${text}</sup>`;
+              }
+              break;
+            }
+            case 'textColor': {
+              const color = (mark.attrs as { color?: string })?.color;
+              if (color) {
+                text = `<span style="color:${color}">${text}</span>`;
+              }
+              break;
+            }
           }
         }
       }
@@ -314,16 +148,35 @@ function nodeToMarkdown(node: JiraDocumentNode): string {
 
     case 'bulletList':
       return (node.content || [])
-        .map((item) => `- ${nodeToMarkdown(item)}`)
+        .map((item) => {
+          const itemContent = nodeToMarkdown(item, indent + '  ');
+          return `${indent}- ${itemContent}`;
+        })
         .join('\n');
 
     case 'orderedList':
       return (node.content || [])
-        .map((item, i) => `${i + 1}. ${nodeToMarkdown(item)}`)
+        .map((item, i) => {
+          const itemContent = nodeToMarkdown(item, indent + '   ');
+          return `${indent}${i + 1}. ${itemContent}`;
+        })
         .join('\n');
 
-    case 'listItem':
-      return (node.content || []).map((n) => nodeToMarkdown(n)).join('');
+    case 'listItem': {
+      const contents = node.content || [];
+      if (contents.length === 0) return '';
+
+      // First element is usually a paragraph
+      const firstContent = nodeToMarkdown(contents[0]!);
+
+      // Rest might be nested lists
+      const rest = contents
+        .slice(1)
+        .map((n) => '\n' + nodeToMarkdown(n, indent))
+        .join('');
+
+      return firstContent + rest;
+    }
 
     case 'codeBlock': {
       const language = (node.attrs as { language?: string })?.language || '';
@@ -363,8 +216,57 @@ function nodeToMarkdown(node: JiraDocumentNode): string {
       return '[media]';
 
     case 'table':
-      // Simplified table handling
-      return '[table]';
+      return tableToMarkdown(node);
+
+    case 'tableRow':
+    case 'tableHeader':
+    case 'tableCell':
+      // These are handled by tableToMarkdown
+      return (node.content || []).map((n) => nodeToMarkdown(n)).join('');
+
+    case 'panel': {
+      const panelType =
+        (node.attrs as { panelType?: string })?.panelType || 'info';
+      const content = (node.content || [])
+        .map((n) => nodeToMarkdown(n))
+        .join('\n');
+      return `> **[${panelType.toUpperCase()}]**\n> ${content.split('\n').join('\n> ')}`;
+    }
+
+    case 'expand':
+    case 'nestedExpand': {
+      const title = (node.attrs as { title?: string })?.title || 'Details';
+      const content = (node.content || [])
+        .map((n) => nodeToMarkdown(n))
+        .join('\n');
+      return `<details>\n<summary>${title}</summary>\n\n${content}\n</details>`;
+    }
+
+    case 'status': {
+      const attrs = node.attrs as { text?: string; color?: string };
+      return `[${attrs?.text || 'STATUS'}]`;
+    }
+
+    case 'date': {
+      const timestamp = (node.attrs as { timestamp?: string })?.timestamp;
+      if (timestamp) {
+        const date = new Date(parseInt(timestamp, 10));
+        return date.toLocaleDateString();
+      }
+      return '[date]';
+    }
+
+    case 'taskList':
+      return (node.content || []).map((n) => nodeToMarkdown(n)).join('\n');
+
+    case 'taskItem': {
+      const state = (node.attrs as { state?: string })?.state;
+      const checked = state === 'DONE' ? 'x' : ' ';
+      const content = (node.content || [])
+        .map((n) => nodeToMarkdown(n))
+        .join('');
+      return `- [${checked}] ${content}`;
+    }
 
     default:
       // For unknown types, try to extract text content
@@ -373,6 +275,73 @@ function nodeToMarkdown(node: JiraDocumentNode): string {
       }
       return node.text || '';
   }
+}
+
+/**
+ * Converts an ADF table node to markdown table format.
+ */
+function tableToMarkdown(tableNode: JiraDocumentNode): string {
+  const rows = tableNode.content || [];
+  if (rows.length === 0) return '';
+
+  const tableData: string[][] = [];
+  let hasHeader = false;
+
+  for (const row of rows) {
+    if (row.type !== 'tableRow') continue;
+
+    const cells = row.content || [];
+    const rowData: string[] = [];
+
+    for (const cell of cells) {
+      // Check if this is a header cell
+      if (cell.type === 'tableHeader') {
+        hasHeader = true;
+      }
+
+      // Extract cell content
+      const cellContent = (cell.content || [])
+        .map((n) => nodeToMarkdown(n))
+        .join(' ')
+        .replace(/\n/g, ' ')
+        .trim();
+
+      rowData.push(cellContent);
+    }
+
+    tableData.push(rowData);
+  }
+
+  if (tableData.length === 0) return '';
+
+  // Determine column widths for alignment
+  const colCount = Math.max(...tableData.map((row) => row.length));
+
+  // Build markdown table
+  const lines: string[] = [];
+
+  for (let i = 0; i < tableData.length; i++) {
+    const row = tableData[i]!;
+    // Pad row to have consistent column count
+    while (row.length < colCount) {
+      row.push('');
+    }
+
+    lines.push('| ' + row.join(' | ') + ' |');
+
+    // Add separator after first row (header)
+    if (i === 0 && hasHeader) {
+      lines.push('| ' + row.map(() => '---').join(' | ') + ' |');
+    }
+  }
+
+  // If no header was detected but we have data, add separator after first row anyway
+  if (!hasHeader && tableData.length > 0) {
+    const firstRow = tableData[0]!;
+    lines.splice(1, 0, '| ' + firstRow.map(() => '---').join(' | ') + ' |');
+  }
+
+  return lines.join('\n');
 }
 
 /**

@@ -14,7 +14,7 @@ import {
   getComment,
 } from '../../jira/endpoints/comments.js';
 import { encodeToon, simplifyComment } from '../../formatters/toon.js';
-import { adfToPlainText, isAdfDocument } from '../../utils/adf.js';
+import { adfToMarkdown, isAdfDocument } from '../../utils/adf.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   logAudit,
@@ -103,7 +103,7 @@ function formatComment(
     return {
       ...comment,
       body: isAdfDocument(comment.body)
-        ? adfToPlainText(comment.body)
+        ? adfToMarkdown(comment.body)
         : comment.body,
     };
   }

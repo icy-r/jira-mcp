@@ -14,6 +14,8 @@ import type {
   JqlSearchResponse,
 } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
+import { resolveUserIdentifier } from './users.js';
+import { markdownToAdf } from '../../utils/adf.js';
 
 const logger = createLogger('jira-issues');
 
@@ -76,16 +78,8 @@ export async function createIssue(input: CreateIssueInput): Promise<JiraIssue> {
   const fields = body['fields'] as Record<string, unknown>;
 
   if (input.description) {
-    fields['description'] = {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text: input.description }],
-        },
-      ],
-    };
+    // Convert markdown to ADF for proper formatting
+    fields['description'] = markdownToAdf(input.description);
   }
 
   if (input.priority) {
@@ -93,7 +87,9 @@ export async function createIssue(input: CreateIssueInput): Promise<JiraIssue> {
   }
 
   if (input.assignee) {
-    fields['assignee'] = { accountId: input.assignee };
+    // Resolve assignee by email, name, or account ID
+    const accountId = await resolveUserIdentifier(input.assignee);
+    fields['assignee'] = { accountId };
   }
 
   if (input.labels?.length) {
@@ -147,17 +143,9 @@ export async function updateIssue(
   }
 
   if (input.description !== undefined) {
+    // Convert markdown to ADF for proper formatting
     fields['description'] = input.description
-      ? {
-          type: 'doc',
-          version: 1,
-          content: [
-            {
-              type: 'paragraph',
-              content: [{ type: 'text', text: input.description }],
-            },
-          ],
-        }
+      ? markdownToAdf(input.description)
       : null;
   }
 
@@ -166,7 +154,13 @@ export async function updateIssue(
   }
 
   if (input.assignee !== undefined) {
-    fields['assignee'] = input.assignee ? { accountId: input.assignee } : null;
+    if (input.assignee) {
+      // Resolve assignee by email, name, or account ID
+      const accountId = await resolveUserIdentifier(input.assignee);
+      fields['assignee'] = { accountId };
+    } else {
+      fields['assignee'] = null;
+    }
   }
 
   if (input.labels !== undefined) {
@@ -246,20 +240,12 @@ export async function transitionIssue(
   };
 
   if (comment) {
+    // Convert markdown to ADF for proper formatting
     body['update'] = {
       comment: [
         {
           add: {
-            body: {
-              type: 'doc',
-              version: 1,
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [{ type: 'text', text: comment }],
-                },
-              ],
-            },
+            body: markdownToAdf(comment),
           },
         },
       ],
@@ -275,13 +261,18 @@ export async function transitionIssue(
  * Assigns an issue to a user.
  *
  * @param issueIdOrKey - The issue key or ID
- * @param accountId - The user's account ID (null to unassign)
+ * @param userIdentifier - The user's account ID, email, or display name (null to unassign)
  */
 export async function assignIssue(
   issueIdOrKey: string,
-  accountId: string | null
+  userIdentifier: string | null
 ): Promise<void> {
-  logger.debug('Assigning issue', { issueIdOrKey, accountId });
+  logger.debug('Assigning issue', { issueIdOrKey, userIdentifier });
+
+  let accountId: string | null = null;
+  if (userIdentifier) {
+    accountId = await resolveUserIdentifier(userIdentifier);
+  }
 
   await getClient().put(`/rest/api/3/issue/${issueIdOrKey}/assignee`, {
     body: { accountId },
@@ -435,4 +426,227 @@ export async function* searchAllIssues(
 
     nextPageToken = response.nextPageToken;
   } while (nextPageToken && count < maxTotal);
+}
+
+/**
+ * Gets all issues for a specific project.
+ *
+ * @param projectKey - The project key (e.g., "PROJ")
+ * @param _startAt - Starting index for pagination (reserved for future use)
+ * @param maxResults - Maximum results to return
+ * @param fields - Optional fields to return
+ * @returns Search results with pagination
+ */
+export async function getProjectIssues(
+  projectKey: string,
+  _startAt: number = 0,
+  maxResults: number = 50,
+  fields?: string[]
+): Promise<JqlSearchResponse> {
+  logger.debug('Getting project issues', { projectKey });
+
+  const jql = `project = "${projectKey}" ORDER BY updated DESC`;
+  return searchIssues({
+    jql,
+    maxResults,
+    fields: fields ?? MINIMAL_ISSUE_FIELDS,
+  });
+}
+
+/**
+ * Input for batch issue creation.
+ */
+export interface BatchCreateIssueInput {
+  projectKey: string;
+  summary: string;
+  issueType: string;
+  description?: string;
+  priority?: string;
+  assignee?: string;
+  labels?: string[];
+  components?: string[];
+  parentKey?: string;
+  customFields?: Record<string, unknown>;
+}
+
+/**
+ * Creates multiple issues in a batch.
+ *
+ * @param issues - Array of issue creation inputs
+ * @param validateOnly - If true, only validates without creating
+ * @returns Array of created issues (or empty if validateOnly)
+ */
+export async function batchCreateIssues(
+  issues: BatchCreateIssueInput[],
+  validateOnly: boolean = false
+): Promise<JiraIssue[]> {
+  logger.debug('Batch creating issues', { count: issues.length, validateOnly });
+
+  if (issues.length === 0) {
+    return [];
+  }
+
+  // Build issue updates with resolved assignees
+  const issueUpdates: Array<{ fields: Record<string, unknown> }> = [];
+
+  for (const input of issues) {
+    const fields: Record<string, unknown> = {
+      project: { key: input.projectKey },
+      summary: input.summary,
+      issuetype: { name: input.issueType },
+    };
+
+    if (input.description) {
+      // Convert markdown to ADF for proper formatting
+      fields['description'] = markdownToAdf(input.description);
+    }
+
+    if (input.priority) {
+      fields['priority'] = { name: input.priority };
+    }
+
+    if (input.assignee) {
+      // Resolve assignee by email, name, or account ID
+      const accountId = await resolveUserIdentifier(input.assignee);
+      fields['assignee'] = { accountId };
+    }
+
+    if (input.labels?.length) {
+      fields['labels'] = input.labels;
+    }
+
+    if (input.components?.length) {
+      fields['components'] = input.components.map((name) => ({ name }));
+    }
+
+    if (input.parentKey) {
+      fields['parent'] = { key: input.parentKey };
+    }
+
+    if (input.customFields) {
+      Object.assign(fields, input.customFields);
+    }
+
+    issueUpdates.push({ fields });
+  }
+
+  if (validateOnly) {
+    logger.info('Validation only - not creating issues');
+    return [];
+  }
+
+  const response = await getClient().post<{
+    issues: Array<{ id: string; key: string; self: string }>;
+    errors: Array<{ status: number; elementErrors: Record<string, unknown> }>;
+  }>('/rest/api/3/issue/bulk', { body: { issueUpdates } });
+
+  // Log any errors
+  if (response.errors?.length) {
+    for (const err of response.errors) {
+      logger.error('Batch creation error', err as unknown as Error);
+    }
+  }
+
+  // Fetch full issue data for created issues
+  const createdIssues: JiraIssue[] = [];
+  for (const issueInfo of response.issues || []) {
+    if (issueInfo.key) {
+      try {
+        const issue = await getIssue(issueInfo.key);
+        createdIssues.push(issue);
+      } catch (fetchErr) {
+        logger.error(
+          `Failed to fetch created issue ${issueInfo.key}`,
+          fetchErr as Error
+        );
+      }
+    }
+  }
+
+  return createdIssues;
+}
+
+/**
+ * Changelog item from bulk fetch.
+ */
+export interface ChangelogItem {
+  field: string;
+  fieldtype: string;
+  from: string | null;
+  fromString: string | null;
+  to: string | null;
+  toString: string | null;
+}
+
+/**
+ * Changelog entry from bulk fetch.
+ */
+export interface ChangelogEntry {
+  id: string;
+  author: JiraUser;
+  created: string;
+  items: ChangelogItem[];
+}
+
+/**
+ * Issue with changelogs from bulk fetch.
+ */
+export interface IssueChangelog {
+  issueId: string;
+  changelogs: ChangelogEntry[];
+}
+
+/**
+ * Gets changelogs for multiple issues in a batch (Cloud only).
+ *
+ * @param issueIdsOrKeys - Array of issue IDs or keys
+ * @param fieldIds - Optional array of field IDs to filter changelogs
+ * @returns Array of issues with their changelogs
+ */
+export async function batchGetChangelogs(
+  issueIdsOrKeys: string[],
+  fieldIds?: string[]
+): Promise<IssueChangelog[]> {
+  logger.debug('Batch getting changelogs', { count: issueIdsOrKeys.length });
+
+  const results: IssueChangelog[] = [];
+  let startAt = 0;
+  const maxResults = 100;
+
+  // Fetch all pages
+  while (true) {
+    const response = await getClient().post<{
+      startAt: number;
+      maxResults: number;
+      total: number;
+      isLast: boolean;
+      issueChangeLogs: Array<{
+        issueId: string;
+        changeHistories: ChangelogEntry[];
+      }>;
+    }>('/rest/api/3/changelog/bulkfetch', {
+      body: {
+        issueIdsOrKeys,
+        fieldIds: fieldIds || null,
+      },
+      params: { startAt, maxResults },
+    });
+
+    for (const item of response.issueChangeLogs || []) {
+      // Find existing entry or create new one
+      let existing = results.find((r) => r.issueId === item.issueId);
+      if (!existing) {
+        existing = { issueId: item.issueId, changelogs: [] };
+        results.push(existing);
+      }
+      existing.changelogs.push(...(item.changeHistories || []));
+    }
+
+    if (response.isLast) {
+      break;
+    }
+    startAt += maxResults;
+  }
+
+  return results;
 }

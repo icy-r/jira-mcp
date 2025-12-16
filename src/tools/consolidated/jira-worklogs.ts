@@ -13,7 +13,7 @@ import {
   deleteWorklog,
 } from '../../jira/endpoints/worklogs.js';
 import { encodeToon } from '../../formatters/toon.js';
-import { adfToPlainText, isAdfDocument } from '../../utils/adf.js';
+import { adfToMarkdown, isAdfDocument } from '../../utils/adf.js';
 import { createLogger } from '../../utils/logger.js';
 import type { JiraWorklog } from '../../jira/types.js';
 
@@ -65,6 +65,26 @@ const jiraWorklogsSchema = z.object({
     .optional()
     .describe('When work started (ISO datetime) - required for add'),
   comment: z.string().optional().describe('Worklog comment'),
+
+  // Estimate adjustment options (for add action)
+  adjustEstimate: z
+    .enum(['new', 'leave', 'manual', 'auto'])
+    .optional()
+    .describe(
+      'How to adjust remaining estimate: new (set new value), leave (unchanged), manual (reduce by amount), auto (reduce by time spent)'
+    ),
+  newEstimate: z
+    .string()
+    .optional()
+    .describe(
+      'New remaining estimate (e.g., "3h") - required when adjustEstimate is "new"'
+    ),
+  reduceBy: z
+    .string()
+    .optional()
+    .describe(
+      'Amount to reduce remaining estimate by (e.g., "1h") - required when adjustEstimate is "manual"'
+    ),
 });
 
 type JiraWorklogsInput = z.infer<typeof jiraWorklogsSchema>;
@@ -78,7 +98,7 @@ function simplifyWorklog(worklog: JiraWorklog): Record<string, unknown> {
     if (typeof worklog.comment === 'string') {
       commentText = worklog.comment;
     } else if (isAdfDocument(worklog.comment)) {
-      commentText = adfToPlainText(worklog.comment);
+      commentText = adfToMarkdown(worklog.comment);
     }
   }
 
@@ -126,7 +146,12 @@ async function handleJiraWorklogs(input: JiraWorklogsInput): Promise<string> {
         issueKey,
         input.timeSpent,
         input.started,
-        input.comment
+        input.comment,
+        {
+          adjustEstimate: input.adjustEstimate,
+          newEstimate: input.newEstimate,
+          reduceBy: input.reduceBy,
+        }
       );
 
       return encodeToon({

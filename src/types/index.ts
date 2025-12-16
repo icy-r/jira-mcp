@@ -36,6 +36,8 @@ export interface JiraConfig {
   email: string;
   /** API token for authentication (never logged or exposed) */
   apiToken: string;
+  /** Comma-separated list of project keys to filter (optional) */
+  projectsFilter?: string;
 }
 
 /**

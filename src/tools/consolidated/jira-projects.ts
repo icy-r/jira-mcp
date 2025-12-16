@@ -66,6 +66,11 @@ const jiraProjectsSchema = z.object({
     .optional()
     .default(0)
     .describe('Starting index for pagination'),
+  includeArchived: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Include archived projects in list (default: false)'),
 
   // Version fields
   versionId: z
@@ -105,7 +110,8 @@ async function handleJiraProjects(input: JiraProjectsInput): Promise<string> {
     case 'list': {
       const response = await listProjects(
         input.startAt ?? 0,
-        input.maxResults ?? 50
+        input.maxResults ?? 50,
+        input.includeArchived ?? false
       );
 
       if (input.full) {

@@ -23,6 +23,7 @@ export const jiraConfigSchema = z.object({
     ),
   email: z.string().email('JIRA_EMAIL must be a valid email address'),
   apiToken: z.string().min(1, 'JIRA_API_TOKEN is required'),
+  projectsFilter: z.string().optional(),
 });
 
 /**
@@ -43,6 +44,7 @@ export const envSchema = z.object({
   JIRA_BASE_URL: z.string().url(),
   JIRA_EMAIL: z.string().email(),
   JIRA_API_TOKEN: z.string().min(1),
+  JIRA_PROJECTS_FILTER: z.string().optional(),
   JIRA_MCP_LOG_LEVEL: logLevelSchema.optional(),
   JIRA_MCP_RATE_LIMIT: z.coerce.number().int().positive().optional(),
   JIRA_MCP_USE_TOON: z

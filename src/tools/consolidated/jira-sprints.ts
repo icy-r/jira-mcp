@@ -183,6 +183,22 @@ async function handleJiraSprints(input: JiraSprintsInput): Promise<string> {
         throw new Error('name is required for create action');
       }
 
+      // Validate dates if provided
+      if (input.startDate && input.endDate) {
+        const startDate = new Date(input.startDate);
+        const endDate = new Date(input.endDate);
+
+        if (isNaN(startDate.getTime())) {
+          throw new Error('startDate is not a valid ISO date format');
+        }
+        if (isNaN(endDate.getTime())) {
+          throw new Error('endDate is not a valid ISO date format');
+        }
+        if (endDate <= startDate) {
+          throw new Error('endDate must be after startDate');
+        }
+      }
+
       const sprint = await createSprint(
         boardId,
         input.name,
@@ -200,6 +216,22 @@ async function handleJiraSprints(input: JiraSprintsInput): Promise<string> {
     case 'update': {
       if (!input.sprintId) {
         throw new Error('sprintId is required for update action');
+      }
+
+      // Validate dates if both are provided
+      if (input.startDate && input.endDate) {
+        const startDate = new Date(input.startDate);
+        const endDate = new Date(input.endDate);
+
+        if (isNaN(startDate.getTime())) {
+          throw new Error('startDate is not a valid ISO date format');
+        }
+        if (isNaN(endDate.getTime())) {
+          throw new Error('endDate is not a valid ISO date format');
+        }
+        if (endDate <= startDate) {
+          throw new Error('endDate must be after startDate');
+        }
       }
 
       const sprint = await updateSprint(input.sprintId, {

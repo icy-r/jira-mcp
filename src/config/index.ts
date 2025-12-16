@@ -37,6 +37,7 @@ export function loadConfig(): AppConfig {
       baseUrl: env.JIRA_BASE_URL.replace(/\/$/, ''), // Remove trailing slash
       email: env.JIRA_EMAIL,
       apiToken: env.JIRA_API_TOKEN,
+      projectsFilter: env.JIRA_PROJECTS_FILTER,
     },
     logLevel: env.JIRA_MCP_LOG_LEVEL ?? 'info',
     rateLimit: env.JIRA_MCP_RATE_LIMIT ?? 100,

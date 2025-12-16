@@ -11,6 +11,7 @@ import {
   getBoard,
   getBoardConfiguration,
   getBoardBacklog,
+  getBoardIssues,
 } from '../../jira/endpoints/boards.js';
 import {
   getSprintIssues,
@@ -26,7 +27,14 @@ const logger = createLogger('tool-jira-boards');
  */
 const jiraBoardsSchema = z.object({
   action: z
-    .enum(['list', 'get', 'get_config', 'get_issues', 'get_backlog'])
+    .enum([
+      'list',
+      'get',
+      'get_config',
+      'get_issues',
+      'get_backlog',
+      'get_board_issues',
+    ])
     .describe('The action to perform'),
 
   // Board identification
@@ -34,9 +42,13 @@ const jiraBoardsSchema = z.object({
     .number()
     .optional()
     .describe(
-      'Board ID - required for get, get_config, get_issues, get_backlog'
+      'Board ID - required for get, get_config, get_issues, get_backlog, get_board_issues'
     ),
   projectKey: z.string().optional().describe('Project key to filter boards'),
+  boardName: z
+    .string()
+    .optional()
+    .describe('Board name for fuzzy search (for list action)'),
 
   // Get options
   full: z
@@ -65,7 +77,9 @@ const jiraBoardsSchema = z.object({
   jql: z
     .string()
     .optional()
-    .describe('Additional JQL filter for get_issues/get_backlog'),
+    .describe(
+      'Additional JQL filter for get_issues/get_backlog/get_board_issues'
+    ),
 });
 
 type JiraBoardsInput = z.infer<typeof jiraBoardsSchema>;
@@ -82,7 +96,8 @@ async function handleJiraBoards(input: JiraBoardsInput): Promise<string> {
         input.projectKey,
         input.type,
         input.startAt ?? 0,
-        input.maxResults ?? 50
+        input.maxResults ?? 50,
+        input.boardName
       );
 
       if (input.full) {
@@ -209,6 +224,47 @@ async function handleJiraBoards(input: JiraBoardsInput): Promise<string> {
       });
     }
 
+    case 'get_board_issues': {
+      if (!input.boardId) {
+        throw new Error('boardId is required for get_board_issues action');
+      }
+
+      const response = await getBoardIssues(
+        input.boardId,
+        input.startAt ?? 0,
+        input.maxResults ?? 50,
+        input.jql
+      );
+
+      if (input.full) {
+        return JSON.stringify(response, null, 2);
+      }
+
+      // Transform response values to match expected format
+      const issues = response.values.map((issue) => ({
+        key: issue.key,
+        fields: {
+          summary: (issue.fields?.['summary'] as string) ?? '',
+          status: issue.fields?.['status'] as { name: string } | undefined,
+          priority: issue.fields?.['priority'] as { name: string } | undefined,
+          assignee: issue.fields?.['assignee'] as
+            | { displayName: string }
+            | null
+            | undefined,
+          issuetype: issue.fields?.['issuetype'] as
+            | { name: string }
+            | undefined,
+          updated: issue.fields?.['updated'] as string | undefined,
+        },
+      }));
+
+      return encodeToon({
+        issues: simplifyIssues(issues),
+        total: response.total,
+        hasMore: !response.isLast,
+      });
+    }
+
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -221,11 +277,12 @@ export function registerJiraBoardsTool(server: McpServer): void {
   server.tool(
     'jira_boards',
     `Manage Jira boards. Actions:
-- list: List all boards (filter by projectKey or type: scrum, kanban, simple)
+- list: List all boards (filter by projectKey, type, or boardName for fuzzy search)
 - get: Get board details
 - get_config: Get board configuration (columns, estimation)
 - get_issues: Get issues in the active sprint
-- get_backlog: Get backlog issues`,
+- get_backlog: Get backlog issues
+- get_board_issues: Get all issues for a board with optional JQL filter`,
     jiraBoardsSchema.shape,
     async (params) => {
       try {
