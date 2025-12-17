@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/icy-r/jira-mcp/compare/v1.0.1...v1.1.0) (2025-12-17)
+
+
+### Features
+
+* some changes ([a552df4](https://github.com/icy-r/jira-mcp/commit/a552df43f34cc43a3388e931e08134de62a875ad))
+
 ## [1.0.1](https://github.com/icy-r/jira-mcp/compare/v1.0.0...v1.0.1) (2025-12-02)
 
 
